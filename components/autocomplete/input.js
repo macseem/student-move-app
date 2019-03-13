@@ -7,22 +7,30 @@ export default class AutotompleteInput extends React.Component {
   static propTypes = {
     title: PropTypes.string,
     source: PropTypes.func.isRequired,
-    sourceData: PropTypes.arrayOf(PropTypes.shape({
-      key: PropTypes.string.isRequired,
-      title: PropTypes.string.isRequired
-    })),
-    onSelect: PropTypes.func.isRequired
+    sourceData: PropTypes.arrayOf(
+      PropTypes.shape({
+        key: PropTypes.string.isRequired,
+        title: PropTypes.string.isRequired
+      })
+    ),
+    onSelect: PropTypes.func.isRequired,
+    timeoutBeforeSearch: PropTypes.number
+  }
+  static defaultProps = {
+    timeoutBeforeSearch: 400
   }
   constructor(props){
     super(props);
     this.state={
       inputValue: "",
+      timerId: 0
     }
   }
   handleChangeText(text){
     this.setState({inputValue:text})
     if(text.length>2){
-      this.props.source(text)
+      this.state.timerId && clearTimeout(this.state.timerId)
+      this.setState({timerId: setTimeout(() => this.props.source(text), this.props.timeoutBeforeSearch)})
     }
   }
 
