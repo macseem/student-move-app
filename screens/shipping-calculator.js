@@ -1,7 +1,15 @@
 import React from "react";
 import { View, Text, Modal, ScrollView } from "react-native";
 import PropTypes from "prop-types";
-import {Button, HouseRow, ItemsRow, RowsSwitcher, AutocompleteInput, Error} from "../comp-bundle";
+import APIConnector from "../services/connector";
+import {
+  Button,
+  HouseRow,
+  ItemsRow,
+  RowsSwitcher,
+  AutocompleteInput,
+  Error
+} from "../comp-bundle";
 import uuidv4 from "uuid/v4";
 import Config from "../config.json";
 import ModalLoading from "../components/modal-loading";
@@ -29,6 +37,7 @@ export default class ShippingCalculator extends React.Component {
       isLoading: false,
       error: ""
     };
+    this.connector = new APIConnector(Config.APIURL);
   }
   handlePlus(type) {
     amount = this.state.amount;
@@ -66,10 +75,24 @@ export default class ShippingCalculator extends React.Component {
         .then(response => response.json())
         .then(jsonResponse => {
           this.setState({ isLoading: false });
-          if(jsonResponse.hasOwnProperty("error")){
-            this.setState({error: jsonResponse.error.message})
-          } else {
+          if (
+            jsonResponse.hasOwnProperty("rates") &&
+            Array.isArray(jsonResponse.rates) &&
+            jsonResponse.rates.length > 0
+          ) {
             this.props.navigation.navigate("ShippingPrices", jsonResponse);
+          }
+          if (jsonResponse.hasOwnProperty("error")) {
+            this.setState({ error: jsonResponse.error.message });
+            return;
+          }
+          if (
+            (jsonResponse.hasOwnProperty("status") &&
+              jsonResponse.status === "error") ||
+            (jsonResponse.hasOwnProperty("cant_quote") &&
+              jsonResponse.cant_quote === true)
+          ) {
+            this.props.navigate("ContactUs", jsonResponse);
           }
         })
         .catch(error => {
@@ -79,41 +102,25 @@ export default class ShippingCalculator extends React.Component {
     })();
     this.setState({ isLoading: true });
   }
-  findAddress(text, sourceType) {
-    let encodedText = encodeURIComponent(text);
-    let url =
-      Config.APIURL +
-      "/places?input=" +
-      encodedText +
-      "&type=address&sessiontoken=" +
-      this.state.sessiontoken;
-    return fetch(url)
-      .then(response => response.json())
-      .then(responseJSON => {
-        if (
-          typeof responseJSON.predictions === "object" &&
-          Array.isArray(responseJSON.predictions)
-        ) {
-          let sourceData = responseJSON.predictions.map(place => {
-            return {
-              key: place.place_id,
-              title:
-                place.structured_formatting.main_text +
-                ", " +
-                place.structured_formatting.secondary_text
-            };
-          });
-          this.setState({
-            [sourceType]: {
-              sourceData: sourceData,
-              selected: null
-            }
-          });
-        }
-      })
-      .catch(error => {
-        console.error(error);
-      });
+  whenAddressFound(predictions, sourceType){
+    let sourceData = predictions.map(place => {
+      return {
+        key: place.place_id,
+        title:
+          place.structured_formatting.main_text +
+          ", " +
+          place.structured_formatting.secondary_text
+      };
+    });
+    this.setState({
+      [sourceType]: {
+        sourceData: sourceData,
+        selected: null
+      }
+    });
+  }
+  wnehAddressNotFound(error){
+    console.error(error);
   }
   selectAddress(selected, sourceType) {
     this.setState({
@@ -152,7 +159,14 @@ export default class ShippingCalculator extends React.Component {
         <View style={{ flex: 2, borderWidth: 1, borderColor: "black" }}>
           <View style={{ flex: 1, margin: 5 }}>
             <AutocompleteInput
-              source={text => this.findAddress(text, "from")}
+              source={text =>
+                this.connector.findAddress(
+                  text,
+                  this.state.sessiontoken,
+                  predictions => this.whenAddressFound(predictions, "from"),
+                  error => this.wnehAddressNotFound(error)
+                )
+              }
               sourceData={this.state.from.sourceData}
               onSelect={item => this.selectAddress(item, "from")}
               title="From"
@@ -160,7 +174,12 @@ export default class ShippingCalculator extends React.Component {
           </View>
           <View style={{ flex: 1, margin: 5 }}>
             <AutocompleteInput
-              source={text => this.findAddress(text, "to")}
+              source={text => this.connector.findAddress(
+                text,
+                this.state.sessiontoken,
+                predictions => this.whenAddressFound(predictions, "to"),
+                error => this.wnehAddressNotFound(error)
+              )}
               sourceData={this.state.to.sourceData}
               onSelect={item => this.selectAddress(item, "to")}
               title="To"

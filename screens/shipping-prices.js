@@ -11,7 +11,7 @@ export default class ShippingPrices extends React.Component {
           justifyContent: "center"
         }}
       >
-        
+        <Text>{JSON.stringify(this.props.navigation.state.params)}</Text>
       </View>
     );
   }

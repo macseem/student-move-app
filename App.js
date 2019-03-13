@@ -6,7 +6,7 @@ import AccommodationSearch from './screens/accommodation-search';
 import ShippingCalculator from './screens/shipping-calculator';
 import ShippingPrices from './screens/shipping-prices';
 import OrdersList from './screens/orders-list';
-import OrdersList from './screens/contact-us';
+import ContactUs from './screens/contact-us';
 
 const MainNavigator = createStackNavigator({
   Menu: {screen: Menu},
