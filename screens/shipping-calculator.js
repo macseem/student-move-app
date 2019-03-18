@@ -8,101 +8,97 @@ import {
   ItemsRow,
   RowsSwitcher,
   AutocompleteInput,
-  Error
+  Error,
+  ModalLoading
 } from "../comp-bundle";
+import ShippingOrderReq from "../models/shipping-order";
 import uuidv4 from "uuid/v4";
-import Config from "../config.json";
-import ModalLoading from "../components/modal-loading";
 
 export default class ShippingCalculator extends React.Component {
+  static propTypes = {
+    APIConnector: PropTypes.instanceOf(APIConnector).isRequired
+  };
   constructor(props) {
     super(props);
     this.state = {
+      request: {
+        from: "",
+        to: "",
+        items_amount: {
+          box: 0,
+          bike: 0,
+          tv: 0
+        },
+        house_rooms_amount: 0
+      },
       sessiontoken: uuidv4(),
-      amount: {
-        box: 0,
-        bike: 0,
-        tv: 0
-      },
-      activeHouse: 0,
       activeRow: "house",
-      from: {
-        sourceData: [],
-        selected: null
-      },
-      to: {
-        sourceData: [],
-        selected: null
+      sourceDataCollection: {
+        from: [],
+        to: []
       },
       isLoading: false,
       error: ""
     };
-    this.connector = new APIConnector(Config.APIURL);
+  }
+  getPricesRequest() {
+    request = {
+      from: this.state.request.from,
+      to: this.state.request.to
+    };
+    if (this.state.activeRow === "house") {
+      request.house_rooms_amount = this.state.request.house_rooms_amount;
+    } else {
+      request.items_amount = this.state.request.items_amount;
+    }
+    return request;
   }
   handlePlus(type) {
-    amount = this.state.amount;
-    amount[type]++;
-    this.setState({ amount: amount });
+    request = this.state.request;
+    request.items_amount[type]++;
+    this.setState({ request: request });
   }
 
   handleMinus(type) {
-    amount = this.state.amount;
-    amount[type] = Math.max(amount[type] - 1, 0);
-    this.setState({ amount: amount });
+    request = this.state.request;
+    request.items_amount[type] = Math.max(request.items_amount[type] - 1, 0);
+    this.setState({ request: request });
   }
   handleRoomPress(number) {
-    this.setState({ activeHouse: number });
+    request = this.state.request;
+    request.house_rooms_amount = number;
+    this.setState({ request: request });
   }
-  getPrices() {
-    request = {
-      from: this.state.from.selected.key,
-      to: this.state.to.selected.key
-    };
-    if (this.state.activeRow === "house") {
-      request.house_rooms_amount = this.state.activeHouse;
-    } else {
-      request.items_amount = this.state.amount;
+  mapGetPricesResponseToOrderReq(jsonResponse) {
+    orderReq = new ShippingOrderReq();
+    orderReq.type = "shipping";
+    orderReq.details.shipping.description = jsonResponse.data.description;
+    orderReq.details.shipping.rates = jsonResponse.data.rates;
+    orderReq.details.shipping.pricesRequest = this.getPricesRequest();
+    return orderReq;
+  }
+  handleGetPricesResponse(jsonResponse) {
+    this.setState({ isLoading: false });
+    if (jsonResponse.hasOwnProperty("error")) {
+      this.setState({ error: jsonResponse.error.message });
+      return;
     }
-    (async () => {
-      fetch(Config.APIURL + "/shipping/prices", {
-        method: "POST",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(request)
-      })
-        .then(response => response.json())
-        .then(jsonResponse => {
-          this.setState({ isLoading: false });
-          if (
-            jsonResponse.hasOwnProperty("rates") &&
-            Array.isArray(jsonResponse.rates) &&
-            jsonResponse.rates.length > 0
-          ) {
-            this.props.navigation.navigate("ShippingPrices", jsonResponse);
-          }
-          if (jsonResponse.hasOwnProperty("error")) {
-            this.setState({ error: jsonResponse.error.message });
-            return;
-          }
-          if (
-            (jsonResponse.hasOwnProperty("status") &&
-              jsonResponse.status === "error") ||
-            (jsonResponse.hasOwnProperty("cant_quote") &&
-              jsonResponse.cant_quote === true)
-          ) {
-            this.props.navigate("ContactUs", jsonResponse);
-          }
-        })
-        .catch(error => {
-          this.setState({ isLoading: false });
-          console.error(error);
-        });
-    })();
-    this.setState({ isLoading: true });
+    orderReq = this.mapGetPricesResponseToOrderReq(jsonResponse);
+    if (
+      !Array.isArray(orderReq.details.shipping.rates) ||
+      orderReq.details.shipping.rates.length == 0
+    ) {
+      orderReq.status = "no_rates";
+      this.props.navigation.navigate("ContactUs", {
+        orderReq: orderReq
+      });
+      return null;
+    }
+    this.props.navigation.navigate("ShippingPrices", {
+      orderReq: orderReq
+    });
   }
-  whenAddressFound(predictions, sourceType){
+  whenAddressFound(predictions, sourceType) {
     let sourceData = predictions.map(place => {
       return {
         key: place.place_id,
@@ -112,24 +108,38 @@ export default class ShippingCalculator extends React.Component {
           place.structured_formatting.secondary_text
       };
     });
+    sourceDataCollection = this.state.sourceDataCollection;
+    sourceDataCollection[sourceType] = sourceData;
+    request = this.state.request;
+    request[sourceType] = null;
     this.setState({
-      [sourceType]: {
-        sourceData: sourceData,
-        selected: null
-      }
+      sourceDatacollection: sourceDataCollection,
+      request: request
     });
   }
-  wnehAddressNotFound(error){
+  wnehAddressNotFound(error) {
     console.error(error);
   }
   selectAddress(selected, sourceType) {
+    request = this.state.request;
+    request[sourceType] = selected.key;
+    sdc = this.state.sourceDataCollection;
+    sdc[sourceType] = [];
     this.setState({
-      [sourceType]: {
-        selected: selected,
-        sourceData: []
-      }
+      request: request,
+      sourceDataCollection: sdc
     });
   }
+  handleGetPricesPress = () =>
+    this.props.APIConnector.getPrices(this.getPricesRequest(), () =>
+      this.setState({ isLoading: true })
+    )
+      .then(jsonResponse => this.handleGetPricesResponse(jsonResponse))
+      .catch(error => {
+        this.setState({ isLoading: false });
+        console.error(error);
+      });
+
   render() {
     let rows = {
       house: (
@@ -137,12 +147,12 @@ export default class ShippingCalculator extends React.Component {
           onPress={number => {
             this.handleRoomPress(number);
           }}
-          activeHouse={this.state.activeHouse}
+          activeHouse={this.state.request.house_rooms_amount}
         />
       ),
       items: (
         <ItemsRow
-          amount={this.state.amount}
+          amount={this.state.request.items_amount}
           handleMinus={type => {
             this.handleMinus(type);
           }}
@@ -153,131 +163,56 @@ export default class ShippingCalculator extends React.Component {
       )
     };
     return (
-      <ScrollView style={{ flex: 1 }}>
-        <ModalLoading visible={this.state.isLoading} />
-        <Error value={this.state.error} />
-        <View style={{ flex: 2, borderWidth: 1, borderColor: "black" }}>
+      <View style={{ height: "100%" }}>
+        <ScrollView style={{ flex: 1 }}>
+          <ModalLoading visible={this.state.isLoading} />
+          <Error value={this.state.error} />
+
           <View style={{ flex: 1, margin: 5 }}>
             <AutocompleteInput
               source={text =>
-                this.connector.findAddress(
+                this.props.APIConnector.findAddress(
                   text,
                   this.state.sessiontoken,
                   predictions => this.whenAddressFound(predictions, "from"),
                   error => this.wnehAddressNotFound(error)
                 )
               }
-              sourceData={this.state.from.sourceData}
+              sourceData={this.state.sourceDataCollection.from}
               onSelect={item => this.selectAddress(item, "from")}
               title="From"
             />
           </View>
           <View style={{ flex: 1, margin: 5 }}>
             <AutocompleteInput
-              source={text => this.connector.findAddress(
-                text,
-                this.state.sessiontoken,
-                predictions => this.whenAddressFound(predictions, "to"),
-                error => this.wnehAddressNotFound(error)
-              )}
-              sourceData={this.state.to.sourceData}
+              source={text =>
+                this.props.APIConnector.findAddress(
+                  text,
+                  this.state.sessiontoken,
+                  predictions => this.whenAddressFound(predictions, "to"),
+                  error => this.wnehAddressNotFound(error)
+                )
+              }
+              sourceData={this.state.sourceDataCollection.to}
               onSelect={item => this.selectAddress(item, "to")}
               title="To"
             />
           </View>
-        </View>
 
-        <View style={{ flex: 1 }}>
-          <RowsSwitcher
-            activeTab={this.state.activeRow}
-            onPress={type => {
-              this.setState({ activeRow: type });
-            }}
-          />
-        </View>
-        <View
-          style={{
-            flex: 3
-          }}
-        >
+          <View style={{ flex: 1 }}>
+            <RowsSwitcher
+              activeTab={this.state.activeRow}
+              onPress={type => {
+                this.setState({ activeRow: type });
+              }}
+            />
+          </View>
+
           {rows[this.state.activeRow]}
-        </View>
-        <View style={{ flex: 2, borderWidth: 1, borderColor: "black" }}>
-          <Button
-            title="Get Prices"
-            onPress={() => {
-              this.getPrices();
-            }}
-          />
-        </View>
-      </ScrollView>
+        </ScrollView>
+
+        <Button title="Get Prices" onPress={this.handleGetPricesPress} />
+      </View>
     );
   }
 }
-
-/*
-{
-  "status": "success",
-  "description": null,
-  "items": [
-    {
-      "id": 198,
-      "type": "house",
-      "description": "1 Bedroom House",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/house.png"
-    },
-    {
-      "id": 199,
-      "type": "house",
-      "description": "2 Bedroom House",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/house.png"
-    },
-    {
-      "id": 200,
-      "type": "house",
-      "description": "3 Bedroom House",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/house.png"
-    },
-    {
-      "id": 197,
-      "type": "none",
-      "description": "Bike",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/bike.png"
-    },
-    {
-      "id": 196,
-      "type": "none",
-      "description": "Large Box",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/box.png"
-    },
-    {
-      "id": 37,
-      "type": "bedroom ",
-      "description": "TV",
-      "icon": "https:\/\/hei.innovate360.co.uk\/dist\/img\/tv.png"
-    }
-  ],
-  "units": [
-    {
-      "from_unit": "cbm",
-      "name": "Cbm"
-    },
-    {
-      "from_unit": "cuft",
-      "name": "Cuft"
-    },
-    {
-      "from_unit": "ibs",
-      "name": "Lbs"
-    },
-    {
-      "from_unit": "kg",
-      "name": "Kg"
-    },
-    {
-      "from_unit": "km",
-      "name": "Km"
-    }
-  ]
-}
-*/
